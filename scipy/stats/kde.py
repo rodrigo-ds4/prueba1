@@ -36,6 +36,7 @@ from numpy.random import choice, multivariate_normal
 
 # Local imports.
 from . import mvn
+from scipy._lib._util import check_random_state
 
 
 __all__ = ['gaussian_kde']
@@ -437,7 +438,7 @@ class gaussian_kde(object):
 
         return result
 
-    def resample(self, size=None):
+    def resample(self, size=None, seed=None):
         """
         Randomly sample a dataset from the estimated pdf.
 
@@ -447,6 +448,13 @@ class gaussian_kde(object):
             The number of samples to draw.  If not provided, then the size is
             the same as the effective number of samples in the underlying
             dataset.
+        seed : {None, int, `numpy.random.Generator`, `numpy.random.RandomState`}, optional
+            If `seed` is None (or `np.random`), the `numpy.random.RandomState`
+            singleton is used.
+            If `seed` is an int, a new ``RandomState`` instance is used,
+            seeded with `seed`.
+            If `seed` is already a ``Generator`` or ``RandomState`` instance then
+            that instance is used.
 
         Returns
         -------
@@ -457,9 +465,10 @@ class gaussian_kde(object):
         if size is None:
             size = int(self.neff)
 
-        norm = transpose(multivariate_normal(zeros((self.d,), float),
-                                             self.covariance, size=size))
-        indices = choice(self.n, size=size, p=self.weights)
+        random_state = check_random_state(seed)
+        norm = transpose(random_state.multivariate_normal(zeros((self.d,), float),
+                                                          self.covariance, size=size))
+        indices = random_state.choice(self.n, size=size, p=self.weights)
         means = self.dataset[:, indices]
 
         return means + norm
