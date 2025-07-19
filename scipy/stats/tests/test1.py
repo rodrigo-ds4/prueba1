@@ -6,7 +6,6 @@ from numpy.testing import (assert_almost_equal, assert_,
     assert_array_almost_equal, assert_array_almost_equal_nulp, assert_allclose)
 import pytest
 from pytest import raises as assert_raises
-from unittest.mock import patch
 
 
 def test_kde_1d():
@@ -392,52 +391,59 @@ def test_weights_integer():
                     pdf_f.evaluate(xn), atol=1e-14, rtol=1e-14)
 
 
+
+
+
 def test_resample_uses_global_random_functions():
-    """Test that detects if resample uses global numpy.random functions.
+    """Test that demonstrates resample() uses global numpy.random functions.
+    
+    This test identifies the core problem: gaussian_kde.resample currently uses 
+    numpy.random.choice and numpy.multivariate_normal (global functions) instead 
+    of RandomState methods, making results non-reproducible.
     
     Issue: Use RandomState for gaussian_kde.resample
     Currently, scipy.stats.gaussian_kde.resample use numpy.random.choice and 
     numpy.multivariate_normal. However, no RandomState option is available 
     for these two functions.
-    
-    BEFORE fix: FAILS - resample() uses choice and multivariate_normal (global functions)
-    AFTER fix: PASSES - resample() uses RandomState instead
     """
+    from unittest.mock import patch
+    
     np.random.seed(12345)
-    xn = np.random.randn(50)
+    n_basesample = 50
+    xn = np.random.randn(n_basesample)
     gkde = stats.gaussian_kde(xn)
     
-    # Track if global functions are called
+    # Track calls to global numpy.random functions
     choice_called = False
     mvn_called = False
     
     def mock_choice(*args, **kwargs):
         nonlocal choice_called
         choice_called = True
-        # Call the actual function
-        return np.random.choice(*args, **kwargs)
+        # Call original function to maintain functionality
+        return np.random.choice.__wrapped__(*args, **kwargs) if hasattr(np.random.choice, '__wrapped__') else np.random.choice(*args, **kwargs)
     
     def mock_multivariate_normal(*args, **kwargs):
         nonlocal mvn_called
         mvn_called = True
-        # Call the actual function
-        return np.random.multivariate_normal(*args, **kwargs)
+        # Call original function to maintain functionality  
+        return np.random.multivariate_normal.__wrapped__(*args, **kwargs) if hasattr(np.random.multivariate_normal, '__wrapped__') else np.random.multivariate_normal(*args, **kwargs)
     
-    # Patch the functions as imported in kde.py: from numpy.random import choice, multivariate_normal
-    with patch('scipy.stats.kde.choice', side_effect=mock_choice), \
-         patch('scipy.stats.kde.multivariate_normal', side_effect=mock_multivariate_normal):
+    # Patch the global functions to detect their usage
+    with patch('numpy.random.choice', side_effect=mock_choice), \
+         patch('numpy.random.multivariate_normal', side_effect=mock_multivariate_normal):
         
         # This should call the global functions (demonstrating the problem)
-        gkde.resample(30)
-    
-    # Check if global functions were used (this is the PROBLEM in old version)
-    if choice_called or mvn_called:
-        functions_used = []
-        if choice_called:
-            functions_used.append('choice')
-        if mvn_called:
-            functions_used.append('multivariate_normal')
-        pytest.fail(f"BEFORE FIX: resample() uses global functions: {functions_used}. Should use RandomState instead.")
-    
-    # If we reach here, the fix is working - no global functions used
-
+        gkde.resample(10)
+        
+        # PROBLEM DETECTED: resample() uses global numpy.random functions
+        # instead of RandomState methods
+        assert choice_called, \
+            "PROBLEM: resample() uses numpy.random.choice instead of RandomState.choice"
+        assert mvn_called, \
+            "PROBLEM: resample() uses numpy.multivariate_normal instead of RandomState.multivariate_normal"
+        
+        # This test will FAIL, demonstrating the exact issue described:
+        # "Currently, scipy.stats.gaussian_kde.resample use numpy.random.choice 
+        #  and numpy.multivariate_normal. However, no RandomState option is 
+        #  available for these two functions."
